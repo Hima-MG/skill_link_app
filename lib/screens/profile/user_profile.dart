@@ -715,6 +715,7 @@ class _ProfilePageState extends State<ProfilePage> {
 
               const SizedBox(height: 16),
 
+              // Grid posts section
               _UserPostsGridSection(userId: profileUid, isOwner: isOwner),
 
               const SizedBox(height: 24),
