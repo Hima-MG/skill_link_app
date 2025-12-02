@@ -287,6 +287,158 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Show a bottom sheet for the post options (3-dot menu).
+  /// Provides "Report content" (with optional reason) — saved to `reports` collection.
+  Future<void> _showPostOptions(
+    BuildContext context, {
+    required String postId,
+    required Map<String, dynamic> postData,
+  }) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      backgroundColor: Colors.white,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.report_outlined,
+                  color: Colors.redAccent,
+                ),
+                title: const Text('Report content'),
+                subtitle: const Text(
+                  'Report this post for inappropriate content',
+                ),
+                onTap: () async {
+                  Navigator.of(ctx).pop(); // close bottom sheet
+                  // open confirmation dialog with optional reason
+                  final reasonCtrl = TextEditingController();
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (dctx) {
+                      return AlertDialog(
+                        title: const Text('Report post'),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'Are you sure you want to report this post? You can provide a short reason (optional).',
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: reasonCtrl,
+                              decoration: const InputDecoration(
+                                hintText: 'Reason (optional)',
+                              ),
+                              maxLines: 3,
+                            ),
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(dctx).pop(false),
+                            child: const Text('Cancel'),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.teal,
+                            ),
+                            onPressed: () => Navigator.of(dctx).pop(true),
+                            child: const Text(
+                              'Report',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+
+                  if (confirmed != true) {
+                    // user cancelled
+                    return;
+                  }
+
+                  final reason = reasonCtrl.text.trim();
+
+                  // Save report to Firestore
+                  try {
+                    await FirebaseFirestore.instance.collection('reports').add({
+                      'postId': postId,
+                      'postSnapshot':
+                          postData, // optional: store a snapshot copy for review
+                      'reportedBy': currentUser?.uid ?? '',
+                      'reportedByName': currentUser?.displayName ?? '',
+                      'reason': reason,
+                      'createdAt': FieldValue.serverTimestamp(),
+                    });
+
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Report submitted — thank you.'),
+                      ),
+                    );
+                  } catch (e) {
+                    debugPrint('Failed to submit report: $e');
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Failed to submit report. Please try again later.',
+                        ),
+                      ),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.block, color: Colors.black87),
+                title: const Text('Block user'),
+                subtitle: const Text('Stop seeing posts from this user'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  // Placeholder: implement block logic if desired
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(const SnackBar(content: Text('User blocked')));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.share_outlined),
+                title: const Text('Share'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Share feature coming soon')),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _postCard(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
 
@@ -401,7 +553,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 IconButton(
-                  onPressed: () {},
+                  onPressed: () {
+                    // open options bottom sheet (report, block, share, etc.)
+                    _showPostOptions(context, postId: doc.id, postData: data);
+                  },
                   icon: const Icon(Icons.more_horiz),
                 ),
               ],
@@ -440,7 +595,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     fit: BoxFit.cover,
                     width: double.infinity,
                     height: 220,
-                    errorBuilder: (_, __, ___) => Container(
+                    errorBuilder: (_, _, _) => Container(
                       height: 220,
                       color: Colors.grey.shade200,
                       child: const Center(child: Icon(Icons.broken_image)),
@@ -731,7 +886,6 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Trending Skills (auto-scrolling PageView with centered dots)
                       Text(
                         'Trending Skills',
                         style: AppTextStyles.subtitle.copyWith(
@@ -755,7 +909,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
                                 final docs = snap.data?.docs ?? [];
 
-                                // Update internal counters safely after frame
                                 WidgetsBinding.instance.addPostFrameCallback((
                                   _,
                                 ) {
@@ -920,7 +1073,7 @@ class FullImageViewer extends StatelessWidget {
           child: Image.network(
             imageUrl,
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) =>
+            errorBuilder: (_, _, _) =>
                 const Icon(Icons.broken_image, color: Colors.white),
           ),
         ),
