@@ -1,3 +1,4 @@
+// lib/screens/profile/user_profile.dart
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -77,6 +78,7 @@ class _ProfilePageState extends State<ProfilePage> {
     );
     if (picked == null) return;
 
+    if (!mounted) return;
     setState(() => _avatarUploading = true);
 
     try {
@@ -713,7 +715,8 @@ class _ProfilePageState extends State<ProfilePage> {
 
               const SizedBox(height: 16),
 
-              _UserPostsSection(userId: profileUid, isOwner: isOwner),
+              // Grid posts section
+              _UserPostsGridSection(userId: profileUid, isOwner: isOwner),
 
               const SizedBox(height: 24),
             ],
@@ -724,21 +727,51 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 }
 
-class _UserPostsSection extends StatelessWidget {
+/// Section showing user's posts in a grid (Instagram-like).
+/// Tries an ordered query first; falls back to an unordered query if Firestore returns an error (missing createdAt/index).
+class _UserPostsGridSection extends StatefulWidget {
   final String userId;
   final bool isOwner;
 
-  const _UserPostsSection({required this.userId, required this.isOwner});
+  const _UserPostsGridSection({required this.userId, required this.isOwner});
+
+  @override
+  State<_UserPostsGridSection> createState() => _UserPostsGridSectionState();
+}
+
+class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
+  late Stream<QuerySnapshot<Map<String, dynamic>>> _postsStream;
+  bool _usedFallback = false;
+  String? _lastErrorMsg;
+
+  @override
+  void initState() {
+    super.initState();
+    _setPreferredStream();
+  }
+
+  void _setPreferredStream() {
+    _postsStream = FirebaseFirestore.instance
+        .collection('posts')
+        .where('userId', isEqualTo: widget.userId)
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+    _usedFallback = false;
+    _lastErrorMsg = null;
+  }
+
+  void _setFallbackStream() {
+    _postsStream = FirebaseFirestore.instance
+        .collection('posts')
+        .where('userId', isEqualTo: widget.userId)
+        .snapshots();
+    _usedFallback = true;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final postsQuery = FirebaseFirestore.instance
-        .collection('posts')
-        .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true);
-
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: postsQuery.snapshots(),
+      stream: _postsStream,
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
           return const Center(
@@ -750,13 +783,55 @@ class _UserPostsSection extends StatelessWidget {
         }
 
         if (snap.hasError) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Center(
-              child: Text(
-                'No posts found',
-                style: AppTextStyles.caption.copyWith(color: Colors.red),
-              ),
+          final errMsg = snap.error?.toString() ?? 'Unknown error';
+          if (!_usedFallback) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _setFallbackStream();
+              setState(() {
+                _lastErrorMsg = errMsg;
+              });
+            });
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          // Already using fallback; show actionable error and retry button
+          return _SectionCard(
+            title: widget.isOwner ? 'My Posts' : 'Posts',
+            child: Column(
+              children: [
+                Text(
+                  'Error loading posts',
+                  style: AppTextStyles.caption.copyWith(color: Colors.red),
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    _lastErrorMsg ?? errMsg,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.caption,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.teal,
+                  ),
+                  onPressed: () {
+                    _setPreferredStream();
+                    setState(() {
+                      _lastErrorMsg = null;
+                    });
+                  },
+                  child: const Text('Retry ordered query'),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Tip: if Firestore shows an index error, open the debug console and follow the link to create the required index.',
+                  style: AppTextStyles.caption.copyWith(fontSize: 12),
+                ),
+              ],
             ),
           );
         }
@@ -764,67 +839,203 @@ class _UserPostsSection extends StatelessWidget {
         final docs = snap.data?.docs ?? [];
 
         return _SectionCard(
-          title: isOwner ? 'My Posts' : 'Posts',
+          title: widget.isOwner
+              ? 'My Posts (${docs.length})'
+              : 'Posts (${docs.length})',
           child: docs.isEmpty
               ? Text(
-                  isOwner
+                  widget.isOwner
                       ? 'You haven\'t shared any posts yet.'
                       : 'No posts yet.',
                   style: AppTextStyles.caption,
                 )
-              : Column(
-                  children: docs
-                      .map((d) => _buildPostCard(context, d.data()))
-                      .toList(),
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final crossAxisCount = constraints.maxWidth > 480 ? 4 : 3;
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        crossAxisSpacing: 6,
+                        mainAxisSpacing: 6,
+                        childAspectRatio: 1,
+                      ),
+                      itemCount: docs.length,
+                      itemBuilder: (context, idx) {
+                        final d = docs[idx].data();
+
+                        final imageUrl =
+                            (d['imageUrl'] ??
+                                    d['media'] ??
+                                    d['thumb'] ??
+                                    d['image'] ??
+                                    '')
+                                as String;
+                        final caption =
+                            (d['content'] ??
+                                    d['description'] ??
+                                    d['caption'] ??
+                                    '')
+                                as String;
+                        final createdRaw = d['createdAt'];
+                        DateTime? created;
+                        if (createdRaw is Timestamp) {
+                          created = createdRaw.toDate();
+                        } else if (createdRaw is DateTime) {
+                          created = createdRaw;
+                        }
+
+                        return GestureDetector(
+                          onTap: () {
+                            if (imageUrl.isNotEmpty) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => _PostImageViewer(
+                                    imageUrl: imageUrl,
+                                    caption: caption,
+                                    created: created,
+                                  ),
+                                ),
+                              );
+                            } else {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => _PostDetailViewer(
+                                    caption: caption,
+                                    created: created,
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade200,
+                              borderRadius: BorderRadius.circular(8),
+                              image: imageUrl.isNotEmpty
+                                  ? DecorationImage(
+                                      image: NetworkImage(imageUrl),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                            ),
+                            child: imageUrl.isEmpty
+                                ? Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(8.0),
+                                      child: Text(
+                                        caption.isNotEmpty
+                                            ? caption
+                                            : 'No image',
+                                        style: AppTextStyles.caption,
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  )
+                                : null,
+                          ),
+                        );
+                      },
+                    );
+                  },
                 ),
         );
       },
     );
   }
+}
 
-  Widget _buildPostCard(BuildContext context, Map<String, dynamic> data) {
-    final content =
-        (data['content'] ?? data['text'] ?? data['caption'] ?? '') as String;
-    final imageUrl = (data['imageUrl'] ?? '') as String;
-    final timestamp = data['createdAt'];
-    DateTime? created;
-    if (timestamp is Timestamp) created = timestamp.toDate();
+class _PostImageViewer extends StatelessWidget {
+  final String imageUrl;
+  final String caption;
+  final DateTime? created;
+  const _PostImageViewer({
+    required this.imageUrl,
+    required this.caption,
+    this.created,
+  });
 
-    String timeText = '';
-    if (created != null) {
-      timeText =
-          '${created.day}/${created.month}/${created.year} • ${created.hour.toString().padLeft(2, '0')}:${created.minute.toString().padLeft(2, '0')}';
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFDFDFD),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.withOpacity(0.08)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  @override
+  Widget build(BuildContext context) {
+    final timeText = created != null
+        ? '${created!.day}/${created!.month}/${created!.year}'
+        : '';
+    return Scaffold(
+      appBar: AppBar(backgroundColor: Colors.black, elevation: 0),
+      backgroundColor: Colors.black,
+      body: Column(
         children: [
-          if (timeText.isNotEmpty)
-            Text(timeText, style: AppTextStyles.caption.copyWith(fontSize: 11)),
-          if (timeText.isNotEmpty) const SizedBox(height: 4),
-          if (content.isNotEmpty)
-            Text(content, style: AppTextStyles.body.copyWith(fontSize: 14)),
-          if (content.isNotEmpty && imageUrl.isNotEmpty)
-            const SizedBox(height: 8),
-          if (imageUrl.isNotEmpty)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Image.network(
-                imageUrl,
-                height: 180,
-                width: double.infinity,
-                fit: BoxFit.cover,
+          Expanded(
+            child: InteractiveViewer(
+              child: Center(
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) =>
+                      const Icon(Icons.broken_image, color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          if (caption.isNotEmpty || timeText.isNotEmpty)
+            Container(
+              width: double.infinity,
+              color: Colors.black87,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (caption.isNotEmpty)
+                    Text(caption, style: const TextStyle(color: Colors.white)),
+                  if (timeText.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        timeText,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _PostDetailViewer extends StatelessWidget {
+  final String caption;
+  final DateTime? created;
+  const _PostDetailViewer({required this.caption, this.created});
+
+  @override
+  Widget build(BuildContext context) {
+    final createdText = created != null
+        ? '${created!.day}/${created!.month}/${created!.year}'
+        : '';
+    return Scaffold(
+      appBar: AppBar(title: const Text('Post')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              caption.isNotEmpty ? caption : '(No caption)',
+              style: AppTextStyles.body,
+            ),
+            const SizedBox(height: 12),
+            if (createdText.isNotEmpty)
+              Text(createdText, style: AppTextStyles.caption),
+          ],
+        ),
       ),
     );
   }

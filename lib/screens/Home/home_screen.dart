@@ -289,15 +289,50 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _postCard(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data();
-    final authorName = (data['authorName'] ?? 'Unknown') as String;
-    final authorAvatar = (data['authorAvatar'] ?? '') as String;
-    final authorId = (data['authorId'] ?? '') as String;
-    final mediaUrl = (data['media'] ?? '') as String;
-    final thumbUrl = (data['thumb'] ?? '') as String;
-    final feedImage = thumbUrl.isNotEmpty ? thumbUrl : mediaUrl;
+
+    // Prefer canonical names, fall back to older keys
+    final authorName =
+        (data['authorName'] ??
+                data['author'] ??
+                data['author_displayName'] ??
+                'Unknown')
+            as String;
+
+    final authorAvatar =
+        (data['authorAvatar'] ?? data['avatarUrl'] ?? data['avatar'] ?? '')
+            as String;
+
+    // canonical user id key is 'userId' (CreatePost writes this). fallback to 'authorId'
+    final authorId = (data['userId'] ?? data['authorId'] ?? '') as String;
+
+    // canonical image key is 'imageUrl' (CreatePost writes this). fallback to media/thumb variants
+    final mediaUrl =
+        (data['imageUrl'] ??
+                data['media'] ??
+                data['thumb'] ??
+                data['image'] ??
+                '')
+            as String;
+
+    // canonical text key is 'content' (CreatePost writes this). fallback to description/caption/text
+    final description =
+        (data['content'] ??
+                data['description'] ??
+                data['caption'] ??
+                data['text'] ??
+                '')
+            as String;
+
     final title = (data['title'] ?? '') as String;
-    final description = (data['description'] ?? '') as String;
-    final createdAt = data['createdAt'] as Timestamp?;
+
+    // createdAt may be Timestamp or DateTime or missing
+    final createdRaw = data['createdAt'];
+    DateTime? created;
+    if (createdRaw is Timestamp) {
+      created = createdRaw.toDate();
+    } else if (createdRaw is DateTime) {
+      created = createdRaw;
+    }
 
     final isLiked = _likedPostIds.contains(doc.id);
 
@@ -314,6 +349,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 GestureDetector(
                   onTap: () {
+                    // navigate to the author's profile; prefer canonical userId
                     if (authorId.isNotEmpty) {
                       Navigator.push(
                         context,
@@ -356,7 +392,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        createdAt != null ? _formatTimestamp(createdAt) : '',
+                        created != null
+                            ? _formatTimestamp(Timestamp.fromDate(created))
+                            : '',
                         style: AppTextStyles.caption,
                       ),
                     ],
@@ -382,12 +420,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ],
             const SizedBox(height: 10),
-            if (feedImage.isNotEmpty)
+            if (mediaUrl.isNotEmpty)
               ClipRRect(
                 borderRadius: BorderRadius.circular(10),
                 child: GestureDetector(
                   onTap: () {
-                    final toShow = mediaUrl.isNotEmpty ? mediaUrl : feedImage;
+                    final toShow = mediaUrl;
                     if (toShow.isNotEmpty) {
                       Navigator.push(
                         context,
@@ -398,7 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     }
                   },
                   child: Image.network(
-                    feedImage,
+                    mediaUrl,
                     fit: BoxFit.cover,
                     width: double.infinity,
                     height: 220,
@@ -410,7 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-            if (feedImage.isEmpty) const SizedBox(height: 4),
+            if (mediaUrl.isEmpty) const SizedBox(height: 4),
             const SizedBox(height: 10),
             Row(
               children: [

@@ -54,6 +54,7 @@ class _CreatePostState extends State<CreatePost> {
       imageQuality: 80,
     );
     if (picked == null) return;
+    if (!mounted) return;
     setState(() {
       _pickedFile = File(picked.path);
     });
@@ -77,33 +78,37 @@ class _CreatePostState extends State<CreatePost> {
       if (user == null) throw Exception('User not signed in');
 
       String mediaUrl = '';
-      String thumbUrl = '';
 
       if (_pickedFile != null) {
         final url = await _uploadToCloudinary(_pickedFile!);
         if (url == null) throw Exception('Image upload failed');
         mediaUrl = url;
-        thumbUrl = url; // use same as media
       }
 
       final docData = {
-        'title': '',
-        'description': _captionCtrl.text.trim(),
-        'category': '',
-        'media': mediaUrl,
-        'thumb': thumbUrl,
-        'isPaid': false,
-        'authorId': user.uid,
+        // canonical fields used across app
+        'userId': user.uid,
+        'content': _captionCtrl.text.trim(),
+        'imageUrl': mediaUrl,
         'authorName': user.displayName ?? 'Unknown',
         'authorAvatar': user.photoURL ?? '',
         'createdAt': FieldValue.serverTimestamp(),
+
+        // backcompat / optional fields
+        'authorId': user.uid,
+        'description': _captionCtrl.text.trim(),
+        'media': mediaUrl,
+        'thumb': mediaUrl,
+        'isPaid': false,
       };
 
       await FirebaseFirestore.instance.collection('posts').add(docData);
 
-      if (mounted) Navigator.of(context).pop(true);
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
     } catch (e) {
       debugPrint('CreatePost error: $e');
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to share post. Please try again.';
       });
