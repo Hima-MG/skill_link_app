@@ -1,10 +1,8 @@
-// lib/core/app_widget.dart
 import 'package:flutter/material.dart';
 import 'app_color.dart';
 import 'app_textstyle.dart';
 
 class AppWidgets {
-  /// Reusable InputDecoration
   static InputDecoration inputDecoration({
     required String hint,
     IconData? icon,

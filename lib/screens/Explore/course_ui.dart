@@ -1,3 +1,4 @@
+// lib/screens/Explore/course_ui.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -5,7 +6,6 @@ import 'package:skill_link_app/core/app_color.dart';
 import 'package:skill_link_app/core/app_textstyle.dart';
 import 'package:skill_link_app/screens/Dashboard/dashboard_screen.dart';
 import 'package:skill_link_app/screens/chat/chat_screen.dart';
-
 import 'package:skill_link_app/screens/profile/user_profile.dart';
 
 class CourseDetailScreen extends StatefulWidget {
@@ -59,18 +59,19 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         final fresh = await tx.get(courseRef);
         final courseData = fresh.data() ?? {};
 
-        final enrolled = List.from(courseData['enrolledUsers'] ?? []);
+        // ensure list is copied to avoid modifying original map reference
+        final enrolled = List<String>.from(
+          courseData['enrolledUsers'] ?? <String>[],
+        );
         final already = enrolled.contains(uid);
 
         if (!already) {
-          // Update course stats
           tx.update(courseRef, {
             'enrolledUsers': FieldValue.arrayUnion([uid]),
             'studentsCount': (courseData['studentsCount'] ?? 0) + 1,
             'popularity': (courseData['popularity'] ?? 0) + 1,
           });
 
-          // Save enrollment inside user/enrollments/{courseId}
           tx.set(userEnrollRef, {
             'courseId': widget.courseId,
             'title': courseData['title'] ?? '',
@@ -157,6 +158,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // compute content bottom padding so content is never hidden by the bottom enroll bar
+    final bottomSafe = MediaQuery.of(context).padding.bottom;
+    const enrollBarHeight =
+        86.0; // approximate height of bottom enroll container
+    final contentBottomPadding = bottomSafe + enrollBarHeight + 12.0;
+
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _courseStream(),
       builder: (context, snap) {
@@ -186,7 +193,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
         final String description = data['description'] ?? '';
 
         final String duration = data['duration'] ?? '1h 30m';
-        final int students = data['studentsCount'] ?? 0;
+        final int students = (data['studentsCount'] ?? 0) as int;
         final String level = data['level'] ?? 'Beginner';
         final double price = (data['price'] ?? 0).toDouble();
         final String? category = data['category'] as String?;
@@ -200,7 +207,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
 
         final String buttonLabel = isEnrolled
             ? "Go to course"
-            : "Enroll to the course"; // updated label
+            : "Enroll to the course";
 
         return Scaffold(
           backgroundColor: Colors.white,
@@ -213,16 +220,23 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                     expandedHeight: 240,
                     pinned: true,
                     backgroundColor: Colors.white,
-                    leading: const BackButton(color: Colors.white),
+                    elevation: 0,
+                    leading: const BackButton(color: Colors.black87),
+                    // give rounded bottom so background image appears rounded
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(
+                        bottom: Radius.circular(26),
+                      ),
+                    ),
                     flexibleSpace: FlexibleSpaceBar(
-                      background: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          ClipRRect(
-                            borderRadius: const BorderRadius.vertical(
-                              bottom: Radius.circular(26),
-                            ),
-                            child: imageUrl.isNotEmpty
+                      background: ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(26),
+                        ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            imageUrl.isNotEmpty
                                 ? Image.network(imageUrl, fit: BoxFit.cover)
                                 : Container(
                                     color: Colors.grey.shade300,
@@ -230,23 +244,20 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                                       child: Icon(Icons.image, size: 40),
                                     ),
                                   ),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              borderRadius: const BorderRadius.vertical(
-                                bottom: Radius.circular(26),
-                              ),
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  Colors.black.withOpacity(0.1),
-                                  Colors.black.withOpacity(0.5),
-                                ],
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Colors.black.withOpacity(0.08),
+                                    Colors.black.withOpacity(0.35),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -254,7 +265,12 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                   // ---------- Content ----------
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 140),
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        20,
+                        20,
+                        contentBottomPadding,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -376,50 +392,48 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               // ---------- Bottom Enroll Button ----------
               Align(
                 alignment: Alignment.bottomCenter,
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-                  decoration: BoxDecoration(
+                child: SafeArea(
+                  top: false,
+                  child: Container(
                     color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        blurRadius: 10,
-                        offset: const Offset(0, -4),
-                        color: Colors.black.withOpacity(0.08),
-                      ),
-                    ],
-                  ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: isEnrolled
-                          ? () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const DashboardScreen(),
-                              ),
-                            )
-                          : _enrolling
-                          ? null
-                          : () => _enroll(snap.data!),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.teal,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(20),
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: isEnrolled
+                            ? () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const DashboardScreen(),
+                                ),
+                              )
+                            : _enrolling
+                            ? null
+                            : () => _enroll(snap.data!),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.teal,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                          ),
                         ),
-                      ),
-                      child: _enrolling
-                          ? const CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            )
-                          : Text(
-                              buttonLabel,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
+                        child: _enrolling
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : Text(
+                                buttonLabel,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
+                      ),
                     ),
                   ),
                 ),
@@ -429,7 +443,7 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
               if (teacherId != null)
                 Positioned(
                   right: 20,
-                  bottom: 90,
+                  bottom: MediaQuery.of(context).padding.bottom + 100,
                   child: FloatingActionButton.extended(
                     heroTag: 'message_teacher_btn',
                     onPressed: () {

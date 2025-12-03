@@ -1,19 +1,16 @@
-// lib/screens/home/home_screen.dart
-import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:carousel_slider/carousel_slider.dart';
 
 import 'package:skill_link_app/core/app_color.dart';
 import 'package:skill_link_app/core/app_textstyle.dart';
 import 'package:skill_link_app/core/app_widget.dart';
 import 'package:skill_link_app/screens/Explore/course_ui.dart';
-
 import 'package:skill_link_app/screens/Explore/explore_page.dart';
-
 import 'package:skill_link_app/screens/post/create_post.dart';
 import 'package:skill_link_app/screens/profile/user_profile.dart';
 import 'package:skill_link_app/screens/chat/chat_list.dart';
@@ -30,59 +27,19 @@ class _HomeScreenState extends State<HomeScreen> {
   final _searchCtrl = TextEditingController();
   int _bottomIndex = 0;
 
-  // Auto-scroll controller & timer for trending cards
-  late final PageController _trendingController;
-  Timer? _autoScrollTimer;
-
-  // Tracking pages & counts for robust wrapping
-  int _currentTrendingPage = 0;
-  int _trendingCount = 0;
-
-  // simple local liked-state (not saved to Firestore yet)
-  final Set<String> _likedPostIds = {};
-
-  // Local fallback placeholder path (uploaded file)
+  // Local fallback placeholder path (optional)
   static const String _localPlaceholder =
       '/mnt/data/Screenshot 2025-11-20 124827.png';
 
   @override
   void initState() {
     super.initState();
-    _trendingController = PageController(viewportFraction: 0.92);
-    _startAutoScroll();
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
-    _trendingController.dispose();
-    _autoScrollTimer?.cancel();
     super.dispose();
-  }
-
-  void _startAutoScroll() {
-    _autoScrollTimer?.cancel();
-    _autoScrollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!mounted) return;
-      if (_trendingCount <= 0) return;
-      if (!_trendingController.hasClients) return;
-
-      final next = (_currentTrendingPage + 1) % _trendingCount;
-      try {
-        _trendingController.animateToPage(
-          next,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeInOut,
-        );
-      } catch (_) {
-        // ignore animation errors if controller not ready
-      }
-    });
-  }
-
-  Future<void> _refresh() async {
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (mounted) setState(() {});
   }
 
   void _onBottomNavTap(int idx) {
@@ -287,8 +244,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Show a bottom sheet for the post options (3-dot menu).
-  /// Provides "Report content" (with optional reason) — saved to `reports` collection.
   Future<void> _showPostOptions(
     BuildContext context, {
     required String postId,
@@ -381,8 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   try {
                     await FirebaseFirestore.instance.collection('reports').add({
                       'postId': postId,
-                      'postSnapshot':
-                          postData, // optional: store a snapshot copy for review
+                      'postSnapshot': postData,
                       'reportedBy': currentUser?.uid ?? '',
                       'reportedByName': currentUser?.displayName ?? '',
                       'reason': reason,
@@ -412,9 +366,26 @@ class _HomeScreenState extends State<HomeScreen> {
                 leading: const Icon(Icons.block, color: Colors.black87),
                 title: const Text('Block user'),
                 subtitle: const Text('Stop seeing posts from this user'),
-                onTap: () {
+                onTap: () async {
                   Navigator.of(ctx).pop();
-                  // Placeholder: implement block logic if desired
+                  // Persist block in a 'blocks' collection (optional)
+                  final currentUid =
+                      FirebaseAuth.instance.currentUser?.uid ?? '';
+                  final authorId =
+                      postData['authorId'] ?? postData['userId'] ?? '';
+                  if (currentUid.isNotEmpty && authorId.isNotEmpty) {
+                    try {
+                      await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(currentUid)
+                          .collection('blockedUsers')
+                          .doc(authorId)
+                          .set({'blockedAt': FieldValue.serverTimestamp()});
+                    } catch (e) {
+                      debugPrint('Failed to block user: $e');
+                    }
+                  }
+
                   ScaffoldMessenger.of(
                     context,
                   ).showSnackBar(const SnackBar(content: Text('User blocked')));
@@ -436,313 +407,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
-    );
-  }
-
-  Widget _postCard(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data();
-
-    // Prefer canonical names, fall back to older keys
-    final authorName =
-        (data['authorName'] ??
-                data['author'] ??
-                data['author_displayName'] ??
-                'Unknown')
-            as String;
-
-    final authorAvatar =
-        (data['authorAvatar'] ?? data['avatarUrl'] ?? data['avatar'] ?? '')
-            as String;
-
-    // canonical user id key is 'userId' (CreatePost writes this). fallback to 'authorId'
-    final authorId = (data['userId'] ?? data['authorId'] ?? '') as String;
-
-    // canonical image key is 'imageUrl' (CreatePost writes this). fallback to media/thumb variants
-    final mediaUrl =
-        (data['imageUrl'] ??
-                data['media'] ??
-                data['thumb'] ??
-                data['image'] ??
-                '')
-            as String;
-
-    // canonical text key is 'content' (CreatePost writes this). fallback to description/caption/text
-    final description =
-        (data['content'] ??
-                data['description'] ??
-                data['caption'] ??
-                data['text'] ??
-                '')
-            as String;
-
-    final title = (data['title'] ?? '') as String;
-
-    // createdAt may be Timestamp or DateTime or missing
-    final createdRaw = data['createdAt'];
-    DateTime? created;
-    if (createdRaw is Timestamp) {
-      created = createdRaw.toDate();
-    } else if (createdRaw is DateTime) {
-      created = createdRaw;
-    }
-
-    final isLiked = _likedPostIds.contains(doc.id);
-
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      elevation: 1,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    // navigate to the author's profile; prefer canonical userId
-                    if (authorId.isNotEmpty) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ProfilePage(userId: authorId),
-                        ),
-                      );
-                    } else {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const ProfilePage()),
-                      );
-                    }
-                  },
-                  child: CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.grey.shade200,
-                    backgroundImage: authorAvatar.isNotEmpty
-                        ? NetworkImage(authorAvatar)
-                        : null,
-                    child: authorAvatar.isEmpty
-                        ? Text(
-                            authorName.isNotEmpty
-                                ? authorName[0].toUpperCase()
-                                : '?',
-                          )
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        authorName,
-                        style: AppTextStyles.subtitle.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        created != null
-                            ? _formatTimestamp(Timestamp.fromDate(created))
-                            : '',
-                        style: AppTextStyles.caption,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    // open options bottom sheet (report, block, share, etc.)
-                    _showPostOptions(context, postId: doc.id, postData: data);
-                  },
-                  icon: const Icon(Icons.more_horiz),
-                ),
-              ],
-            ),
-            if (title.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(title, style: AppTextStyles.title.copyWith(fontSize: 16)),
-            ],
-            if (description.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                description,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: AppTextStyles.body,
-              ),
-            ],
-            const SizedBox(height: 10),
-            if (mediaUrl.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: GestureDetector(
-                  onTap: () {
-                    final toShow = mediaUrl;
-                    if (toShow.isNotEmpty) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => FullImageViewer(imageUrl: toShow),
-                        ),
-                      );
-                    }
-                  },
-                  child: Image.network(
-                    mediaUrl,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    height: 220,
-                    errorBuilder: (_, _, _) => Container(
-                      height: 220,
-                      color: Colors.grey.shade200,
-                      child: const Center(child: Icon(Icons.broken_image)),
-                    ),
-                  ),
-                ),
-              ),
-            if (mediaUrl.isEmpty) const SizedBox(height: 4),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                IconButton(
-                  icon: Icon(
-                    isLiked ? Icons.favorite : Icons.favorite_border,
-                    color: isLiked ? Colors.red : Colors.grey,
-                  ),
-                  onPressed: () {
-                    setState(() {
-                      if (isLiked) {
-                        _likedPostIds.remove(doc.id);
-                      } else {
-                        _likedPostIds.add(doc.id);
-                      }
-                    });
-                  },
-                ),
-                const SizedBox(width: 8),
-                Text('Like', style: AppTextStyles.caption),
-                const SizedBox(width: 16),
-                InkWell(
-                  onTap: () => _openComments(doc.id),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.chat_bubble_outline,
-                        size: 20,
-                        color: Colors.grey.shade700,
-                      ),
-                      const SizedBox(width: 8),
-                      Text('Comment', style: AppTextStyles.caption),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _trendingCardLarge(Map<String, dynamic> data) {
-    final title = (data['title'] ?? '') as String;
-    final teacher = (data['teacherName'] ?? '') as String;
-    final img = (data['image'] ?? '') as String;
-
-    Widget imageWidget;
-    if (img.isNotEmpty) {
-      imageWidget = Image.network(
-        img,
-        width: 320,
-        height: 180,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) =>
-            Container(color: Colors.grey.shade200, height: 180),
-      );
-    } else {
-      if (File(_localPlaceholder).existsSync()) {
-        imageWidget = Image.file(
-          File(_localPlaceholder),
-          width: 320,
-          height: 180,
-          fit: BoxFit.cover,
-        );
-      } else {
-        imageWidget = Container(
-          width: 320,
-          height: 180,
-          color: Colors.grey.shade200,
-        );
-      }
-    }
-
-    return Container(
-      width: 320,
-      margin: const EdgeInsets.only(right: 12),
-      child: Stack(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: imageWidget,
-          ),
-          Positioned(
-            left: 12,
-            bottom: 12,
-            right: 12,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.45),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    teacher,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCenteredIndicators() {
-    if (_trendingCount <= 1) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: List.generate(_trendingCount, (i) {
-          final active = i == _currentTrendingPage;
-          return AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            width: active ? 14 : 8,
-            height: 8,
-            decoration: BoxDecoration(
-              color: active ? AppColors.teal : Colors.grey.shade400,
-              borderRadius: BorderRadius.circular(8),
-            ),
-          );
-        }),
-      ),
     );
   }
 
@@ -834,218 +498,219 @@ class _HomeScreenState extends State<HomeScreen> {
                   constraints: BoxConstraints(
                     maxWidth: min(920, outer.maxWidth),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Home',
-                              style: AppTextStyles.heading.copyWith(
-                                fontSize: 28,
-                                color: teal,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ProfilePage(),
-                              ),
-                            ),
-                            child: CircleAvatar(
-                              radius: 18,
-                              backgroundColor: Colors.grey.shade200,
-                              backgroundImage:
-                                  user?.photoURL != null &&
-                                      user!.photoURL!.isNotEmpty
-                                  ? NetworkImage(user.photoURL!)
-                                  : null,
-                              child:
-                                  (user?.photoURL == null ||
-                                      user!.photoURL!.isEmpty)
-                                  ? Text(
-                                      user?.displayName
-                                              ?.substring(0, 1)
-                                              .toUpperCase() ??
-                                          '?',
-                                    )
-                                  : null,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      AppWidgets.inputField(
-                        controller: _searchCtrl,
-                        hint: 'Search skills, posts or people',
-                        icon: Icons.search,
-                      ),
-                      const SizedBox(height: 12),
-
-                      Text(
-                        'Trending Skills',
-                        style: AppTextStyles.subtitle.copyWith(
-                          color: teal,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        height: 210,
-                        child:
-                            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                              stream: _trendingCoursesStream(),
-                              builder: (context, snap) {
-                                if (snap.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return const Center(
-                                    child: CircularProgressIndicator(),
-                                  );
-                                }
-
-                                final docs = snap.data?.docs ?? [];
-
-                                WidgetsBinding.instance.addPostFrameCallback((
-                                  _,
-                                ) {
-                                  if (!mounted) return;
-                                  if (_trendingCount != docs.length) {
-                                    setState(
-                                      () => _trendingCount = docs.length,
-                                    );
-                                    // Ensure current page is within bounds
-                                    if (_currentTrendingPage >=
-                                            _trendingCount &&
-                                        _trendingCount > 0) {
-                                      _currentTrendingPage = 0;
-                                      _trendingController.jumpToPage(0);
-                                    }
-                                  }
-                                });
-
-                                if (docs.isEmpty) {
-                                  return const Center(
-                                    child: Text('No trending courses yet'),
-                                  );
-                                }
-
-                                final currentUid =
-                                    FirebaseAuth.instance.currentUser?.uid;
-
-                                return Column(
-                                  children: [
-                                    SizedBox(
-                                      height: 180,
-                                      child: PageView.builder(
-                                        controller: _trendingController,
-                                        itemCount: docs.length,
-                                        padEnds: false,
-                                        onPageChanged: (idx) {
-                                          setState(
-                                            () => _currentTrendingPage = idx,
-                                          );
-                                        },
-                                        itemBuilder: (context, index) {
-                                          final doc = docs[index];
-                                          final data = doc.data();
-                                          final courseId = doc.id;
-
-                                          return GestureDetector(
-                                            onTap: () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) =>
-                                                      CourseDetailScreen(
-                                                        courseId: courseId,
-                                                        data: data,
-                                                        currentUserId:
-                                                            currentUid,
-                                                      ),
-                                                ),
-                                              );
-                                            },
-                                            child: _trendingCardLarge(data),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                    _buildCenteredIndicators(),
-                                  ],
-                                );
-                              },
-                            ),
-                      ),
-                      const SizedBox(height: 14),
-
-                      // Posts
-                      Text(
-                        'Posts',
-                        style: AppTextStyles.subtitle.copyWith(
-                          color: teal,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: RefreshIndicator(
-                          onRefresh: _refresh,
-                          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                            stream: _postsStream(),
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
-                                );
-                              }
-                              if (snapshot.hasError) {
-                                return ListView(
-                                  children: [
-                                    Center(
-                                      child: Text(
-                                        'Failed to load posts',
-                                        style: AppTextStyles.body,
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              }
-                              final docs = snapshot.data?.docs ?? [];
-                              if (docs.isEmpty) {
-                                return ListView(
-                                  children: [
-                                    Center(
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(top: 30),
-                                        child: Text(
-                                          'No posts yet — create the first one!',
-                                          style: AppTextStyles.body,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              }
-                              return ListView.builder(
-                                padding: const EdgeInsets.only(
-                                  top: 8,
-                                  bottom: 24,
+                  child: CustomScrollView(
+                    slivers: [
+                      // header row
+                      SliverToBoxAdapter(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Home',
+                                style: AppTextStyles.heading.copyWith(
+                                  fontSize: 28,
+                                  color: teal,
                                 ),
-                                itemCount: docs.length,
-                                itemBuilder: (context, index) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: _postCard(docs[index]),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const ProfilePage(),
+                                ),
+                              ),
+                              child: CircleAvatar(
+                                radius: 18,
+                                backgroundColor: Colors.grey.shade200,
+                                backgroundImage:
+                                    user?.photoURL != null &&
+                                        user!.photoURL!.isNotEmpty
+                                    ? NetworkImage(user.photoURL!)
+                                    : null,
+                                child:
+                                    (user?.photoURL == null ||
+                                        user!.photoURL!.isEmpty)
+                                    ? Text(
+                                        user?.displayName
+                                                ?.substring(0, 1)
+                                                .toUpperCase() ??
+                                            '?',
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(child: const SizedBox(height: 12)),
+
+                      // search
+                      SliverToBoxAdapter(
+                        child: AppWidgets.inputField(
+                          controller: _searchCtrl,
+                          hint: 'Search skills, posts or people',
+                          icon: Icons.search,
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(child: const SizedBox(height: 12)),
+
+                      // Trending title
+                      SliverToBoxAdapter(
+                        child: Text(
+                          'Trending Skills',
+                          style: AppTextStyles.subtitle.copyWith(
+                            color: teal,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(child: const SizedBox(height: 12)),
+
+                      // Trending Carousel (wrapped in StreamBuilder)
+                      SliverToBoxAdapter(
+                        child: SizedBox(
+                          height: 210,
+                          child:
+                              StreamBuilder<
+                                QuerySnapshot<Map<String, dynamic>>
+                              >(
+                                stream: _trendingCoursesStream(),
+                                builder: (context, snap) {
+                                  if (snap.connectionState ==
+                                      ConnectionState.waiting) {
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  }
+
+                                  final docs = snap.data?.docs ?? [];
+
+                                  if (docs.isEmpty) {
+                                    return const Center(
+                                      child: Text('No trending courses yet'),
+                                    );
+                                  }
+
+                                  final currentUid =
+                                      FirebaseAuth.instance.currentUser?.uid;
+
+                                  // build list of widgets for carousel
+                                  final items = docs.map((doc) {
+                                    final data = doc.data();
+                                    final courseId = doc.id;
+                                    return GestureDetector(
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => CourseDetailScreen(
+                                              courseId: courseId,
+                                              data: data,
+                                              currentUserId: currentUid,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      child: _trendingCardLarge(data),
+                                    );
+                                  }).toList();
+
+                                  return CarouselSlider(
+                                    items: items,
+                                    options: CarouselOptions(
+                                      height: 180,
+                                      enlargeCenterPage: true,
+                                      viewportFraction: 0.88,
+                                      enableInfiniteScroll: false,
+                                      padEnds: false,
+                                    ),
+                                  );
+                                },
+                              ),
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(child: const SizedBox(height: 14)),
+
+                      // Posts title
+                      SliverToBoxAdapter(
+                        child: Text(
+                          'Posts',
+                          style: AppTextStyles.subtitle.copyWith(
+                            color: teal,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+
+                      SliverToBoxAdapter(child: const SizedBox(height: 8)),
+
+                      // Posts stream -> SliverList
+                      StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                        stream: _postsStream(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const SliverFillRemaining(
+                              hasScrollBody: false,
+                              child: Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return SliverToBoxAdapter(
+                              child: Center(
+                                child: Text(
+                                  'Failed to load posts',
+                                  style: AppTextStyles.body,
+                                ),
+                              ),
+                            );
+                          }
+                          final docs = snapshot.data?.docs ?? [];
+                          if (docs.isEmpty) {
+                            return SliverToBoxAdapter(
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 30),
+                                  child: Text(
+                                    'No posts yet — create the first one!',
+                                    style: AppTextStyles.body,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          return SliverList(
+                            key: const PageStorageKey('postsList'),
+                            delegate: SliverChildBuilderDelegate((
+                              context,
+                              index,
+                            ) {
+                              final doc = docs[index];
+                              // Use PostCard StatefulWidget to isolate likes & avoid flicker
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: PostCard(
+                                  key: ValueKey(doc.id),
+                                  doc: doc,
+                                  openComments: _openComments,
+                                  showPostOptions: _showPostOptions,
+                                  localPlaceholder: _localPlaceholder,
                                 ),
                               );
-                            },
-                          ),
-                        ),
+                            }, childCount: docs.length),
+                          );
+                        },
                       ),
+
+                      // bottom spacing
+                      SliverToBoxAdapter(child: const SizedBox(height: 24)),
                     ],
                   ),
                 ),
@@ -1055,6 +720,471 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+}
+
+Widget _trendingCardLarge(Map<String, dynamic> data) {
+  final title = (data['title'] ?? '') as String;
+  final teacher = (data['teacherName'] ?? data['authorName'] ?? '') as String;
+  final img = (data['image'] ?? data['thumbnailUrl'] ?? '') as String;
+
+  return Container(
+    width: 320,
+    margin: const EdgeInsets.only(right: 12),
+    child: Stack(
+      children: [
+        // IMAGE
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: img.isNotEmpty
+              ? Image.network(
+                  img,
+                  width: 320,
+                  height: 180,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) =>
+                      Container(color: Colors.grey.shade200, height: 180),
+                )
+              : Container(width: 320, height: 180, color: Colors.grey.shade200),
+        ),
+
+        // TEXT OVERLAY
+        Positioned(
+          left: 12,
+          bottom: 12,
+          right: 12,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.45),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  teacher,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class PostCard extends StatefulWidget {
+  final QueryDocumentSnapshot<Map<String, dynamic>> doc;
+  final void Function(String postId) openComments;
+  final Future<void> Function(
+    BuildContext context, {
+    required String postId,
+    required Map<String, dynamic> postData,
+  })
+  showPostOptions;
+  final String localPlaceholder;
+
+  const PostCard({
+    required Key key,
+    required this.doc,
+    required this.openComments,
+    required this.showPostOptions,
+    required this.localPlaceholder,
+  }) : super(key: key);
+
+  @override
+  State<PostCard> createState() => _PostCardState();
+}
+
+class _PostCardState extends State<PostCard> {
+  late Map<String, dynamic> _data;
+  late String _authorName;
+  late String _authorAvatar;
+  late String _authorId;
+  late String _mediaUrl;
+  late String _description;
+  late String _title;
+  DateTime? _created;
+  bool _isLiked = false;
+  int _likesCount = 0;
+  bool _loadingLikeState = true;
+  bool _processingLike = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initFromDoc(widget.doc);
+    _loadInitialLikeState();
+  }
+
+  void _initFromDoc(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    _data = doc.data();
+    _authorName =
+        (_data['authorName'] ??
+                _data['author'] ??
+                _data['author_displayName'] ??
+                'Unknown')
+            as String;
+    _authorAvatar =
+        (_data['authorAvatar'] ?? _data['avatarUrl'] ?? _data['avatar'] ?? '')
+            as String;
+    _authorId = (_data['userId'] ?? _data['authorId'] ?? '') as String;
+    _mediaUrl =
+        (_data['imageUrl'] ??
+                _data['media'] ??
+                _data['thumb'] ??
+                _data['image'] ??
+                '')
+            as String;
+    _description =
+        (_data['content'] ??
+                _data['description'] ??
+                _data['caption'] ??
+                _data['text'] ??
+                '')
+            as String;
+    _title = (_data['title'] ?? '') as String;
+
+    final createdRaw = _data['createdAt'];
+    if (createdRaw is Timestamp) {
+      _created = createdRaw.toDate();
+    } else if (createdRaw is DateTime) {
+      _created = createdRaw;
+    }
+
+    _likesCount = (_data['likesCount'] ?? 0) as int;
+  }
+
+  // If parent rebuilds with a new doc for same id, avoid overwriting local like state.
+  @override
+  void didUpdateWidget(covariant PostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.doc.id != widget.doc.id) {
+      // new post entirely -> reinitialize
+      _initFromDoc(widget.doc);
+      _loadInitialLikeState();
+    } else {
+      // same post id: update non-like fields (title/desc/media) but keep user-local like info
+      final newData = widget.doc.data();
+      final newMedia =
+          (newData['imageUrl'] ??
+                  newData['media'] ??
+                  newData['thumb'] ??
+                  newData['image'] ??
+                  '')
+              as String;
+      final newTitle = (newData['title'] ?? '') as String;
+      final newDesc =
+          (newData['content'] ??
+                  newData['description'] ??
+                  newData['caption'] ??
+                  newData['text'] ??
+                  '')
+              as String;
+      final newLikesCount = (newData['likesCount'] ?? 0) as int;
+
+      setState(() {
+        _mediaUrl = newMedia;
+        _title = newTitle;
+        _description = newDesc;
+        // don't overwrite _isLiked (user-specific). But if backend changed likesCount drastically
+        // we sync it only if not processing a local change.
+        if (!_processingLike) _likesCount = newLikesCount;
+      });
+    }
+  }
+
+  Future<void> _loadInitialLikeState() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      setState(() {
+        _isLiked = false;
+        _loadingLikeState = false;
+      });
+      return;
+    }
+    try {
+      final likeSnap = await FirebaseFirestore.instance
+          .collection('posts')
+          .doc(widget.doc.id)
+          .collection('likes')
+          .doc(uid)
+          .get();
+      if (!mounted) return;
+      setState(() {
+        _isLiked = likeSnap.exists;
+        _loadingLikeState = false;
+      });
+    } catch (e) {
+      debugPrint('Failed to load like state for ${widget.doc.id}: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLiked = false;
+        _loadingLikeState = false;
+      });
+    }
+  }
+
+  Future<void> _toggleLike() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      // maybe show a login prompt
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please login to like posts')),
+      );
+      return;
+    }
+
+    if (_processingLike) return;
+    setState(() {
+      _processingLike = true;
+      // optimistic UI update
+      if (_isLiked) {
+        _isLiked = false;
+        _likesCount = (_likesCount - 1).clamp(0, 999999);
+      } else {
+        _isLiked = true;
+        _likesCount = _likesCount + 1;
+      }
+    });
+
+    final postRef = FirebaseFirestore.instance
+        .collection('posts')
+        .doc(widget.doc.id);
+    final likeRef = postRef.collection('likes').doc(uid);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final snap = await tx.get(postRef);
+        final current = (snap.data()?['likesCount'] ?? 0) as int;
+        if (_isLiked) {
+          // add like
+          tx.update(postRef, {'likesCount': current + 1});
+          tx.set(likeRef, {'likedAt': FieldValue.serverTimestamp()});
+        } else {
+          // remove like
+          tx.update(postRef, {'likesCount': (current - 1).clamp(0, 999999)});
+          tx.delete(likeRef);
+        }
+      });
+    } catch (e) {
+      debugPrint('Like transaction failed for ${widget.doc.id}: $e');
+      // rollback optimistic change on error
+      if (!mounted) return;
+      setState(() {
+        if (_isLiked) {
+          // we thought we liked, revert
+          _isLiked = false;
+          _likesCount = (_likesCount - 1).clamp(0, 999999);
+        } else {
+          _isLiked = true;
+          _likesCount = _likesCount + 1;
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _processingLike = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Use local cached fields to avoid rebuild flicker when parent updates.
+    final created = _created;
+    final createdText = created != null ? _formatTimestampLocal(created) : '';
+
+    Widget imageWidget;
+    if (_mediaUrl.isNotEmpty) {
+      imageWidget = Image.network(
+        _mediaUrl,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: 220,
+        errorBuilder: (_, __, ___) => Container(
+          height: 220,
+          color: Colors.grey.shade200,
+          child: const Center(child: Icon(Icons.broken_image)),
+        ),
+      );
+    } else {
+      if (File(widget.localPlaceholder).existsSync()) {
+        imageWidget = Image.file(
+          File(widget.localPlaceholder),
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: 220,
+        );
+      } else {
+        imageWidget = Container(height: 220, color: Colors.grey.shade200);
+      }
+    }
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 1,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    if (_authorId.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ProfilePage(userId: _authorId),
+                        ),
+                      );
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ProfilePage()),
+                      );
+                    }
+                  },
+                  child: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.grey.shade200,
+                    backgroundImage: _authorAvatar.isNotEmpty
+                        ? NetworkImage(_authorAvatar)
+                        : null,
+                    child: _authorAvatar.isEmpty
+                        ? Text(
+                            _authorName.isNotEmpty
+                                ? _authorName[0].toUpperCase()
+                                : '?',
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _authorName,
+                        style: AppTextStyles.subtitle.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(createdText, style: AppTextStyles.caption),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    widget.showPostOptions(
+                      context,
+                      postId: widget.doc.id,
+                      postData: _data,
+                    );
+                  },
+                  icon: const Icon(Icons.more_horiz),
+                ),
+              ],
+            ),
+            if (_title.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(_title, style: AppTextStyles.title.copyWith(fontSize: 16)),
+            ],
+            if (_description.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                _description,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyles.body,
+              ),
+            ],
+            const SizedBox(height: 10),
+            if (_mediaUrl.isNotEmpty || widget.localPlaceholder.isNotEmpty)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: GestureDetector(
+                  onDoubleTap: () async {
+                    await _toggleLike();
+                  },
+                  onTap: () {
+                    final toShow = _mediaUrl;
+                    if (toShow.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => FullImageViewer(imageUrl: toShow),
+                        ),
+                      );
+                    }
+                  },
+                  child: imageWidget,
+                ),
+              ),
+            if (_mediaUrl.isEmpty) const SizedBox(height: 4),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                // Like button (uses local optimistic state)
+                IconButton(
+                  icon: Icon(
+                    _isLiked ? Icons.favorite : Icons.favorite_border,
+                    color: _isLiked ? Colors.red : Colors.grey,
+                  ),
+                  onPressed: _loadingLikeState
+                      ? null
+                      : () async => await _toggleLike(),
+                ),
+                const SizedBox(width: 8),
+                Text('$_likesCount', style: AppTextStyles.caption),
+                const SizedBox(width: 12),
+                InkWell(
+                  onTap: () => widget.openComments(widget.doc.id),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.chat_bubble_outline,
+                        size: 20,
+                        color: Colors.grey.shade700,
+                      ),
+                      const SizedBox(width: 8),
+                      Text('Comment', style: AppTextStyles.caption),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatTimestampLocal(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inDays >= 7) return '${dt.day}/${dt.month}/${dt.year}';
+    if (diff.inDays >= 1) return '${diff.inDays}d ago';
+    if (diff.inHours >= 1) return '${diff.inHours}h ago';
+    if (diff.inMinutes >= 1) return '${diff.inMinutes}m ago';
+    return 'just now';
   }
 }
 
@@ -1073,7 +1203,7 @@ class FullImageViewer extends StatelessWidget {
           child: Image.network(
             imageUrl,
             fit: BoxFit.contain,
-            errorBuilder: (_, _, _) =>
+            errorBuilder: (_, __, ___) =>
                 const Icon(Icons.broken_image, color: Colors.white),
           ),
         ),

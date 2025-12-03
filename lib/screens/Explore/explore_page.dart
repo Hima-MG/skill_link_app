@@ -6,8 +6,29 @@ import 'package:skill_link_app/core/app_textstyle.dart';
 import 'package:skill_link_app/screens/Explore/course_ui.dart';
 import 'package:skill_link_app/screens/Explore/create_corse.dart';
 
-class ExploreScreen extends StatelessWidget {
+class ExploreScreen extends StatefulWidget {
   const ExploreScreen({super.key});
+
+  @override
+  State<ExploreScreen> createState() => _ExploreScreenState();
+}
+
+class _ExploreScreenState extends State<ExploreScreen>
+    with SingleTickerProviderStateMixin {
+  // Added "Dance" to the categories list
+  final List<String> _categories = [
+    'All',
+    'Development',
+    'Programming',
+    'Arts',
+    'Dance',
+    'Design',
+    'Business',
+    'Music',
+    'Health and Fitness',
+  ];
+
+  late final TabController _tabController;
 
   Stream<QuerySnapshot> _coursesStream() {
     return FirebaseFirestore.instance
@@ -18,6 +39,48 @@ class ExploreScreen extends StatelessWidget {
 
   Stream<DocumentSnapshot<Map<String, dynamic>>> _userStream(String uid) {
     return FirebaseFirestore.instance.collection('users').doc(uid).snapshots();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: _categories.length, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<bool> _isEnrolled(String courseId, String uid) async {
+    if (uid.isEmpty) return false;
+    final snap = await FirebaseFirestore.instance
+        .collection('courses')
+        .doc(courseId)
+        .collection('students')
+        .doc(uid)
+        .get();
+    return snap.exists;
+  }
+
+  Future<void> _enroll(String courseId, String uid) async {
+    final courseRef = FirebaseFirestore.instance
+        .collection('courses')
+        .doc(courseId);
+    final studentRef = courseRef.collection('students').doc(uid);
+
+    try {
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final courseSnap = await tx.get(courseRef);
+        final currentCount = (courseSnap.data()?['enrolledCount'] ?? 0) as int;
+        tx.set(studentRef, {'enrolledAt': FieldValue.serverTimestamp()});
+        tx.update(courseRef, {'enrolledCount': currentCount + 1});
+      });
+    } catch (e) {
+      debugPrint('Enroll failed: $e');
+      rethrow;
+    }
   }
 
   @override
@@ -56,10 +119,11 @@ class ExploreScreen extends StatelessWidget {
           );
         }
 
-        // ✅ this is now safe:
         final userData = userSnap.data!.data() ?? {};
         final intent = (userData['intent'] ?? 'Learn') as String;
         final bool canCreateCourse = intent == 'Teach' || intent == 'Both';
+        // Enrollment allowed when intent is Learn or Both
+        final bool canEnrollGlobally = intent == 'Learn' || intent == 'Both';
 
         return Scaffold(
           backgroundColor: const Color(0xfff8f8f8),
@@ -74,9 +138,16 @@ class ExploreScreen extends StatelessWidget {
               ),
             ),
             centerTitle: false,
+            bottom: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              labelColor: AppColors.teal,
+              unselectedLabelColor: Colors.grey.shade700,
+              indicatorColor: AppColors.teal,
+              tabs: _categories.map((c) => Tab(text: c)).toList(),
+            ),
           ),
 
-          // Only teachers / both can see this
           floatingActionButton: canCreateCourse
               ? FloatingActionButton(
                   backgroundColor: AppColors.teal,
@@ -120,40 +191,77 @@ class ExploreScreen extends StatelessWidget {
 
               final docs = snapshot.data!.docs;
 
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-                itemCount: docs.length,
-                itemBuilder: (context, index) {
-                  final doc = docs[index];
-                  final data = doc.data() as Map<String, dynamic>;
+              // We'll build a TabBarView with one list per category so switching tabs is snappy.
+              return TabBarView(
+                controller: _tabController,
+                children: _categories.map((category) {
+                  // filter docs client-side by category field (case-insensitive).
+                  final filtered = docs.where((d) {
+                    final data = d.data() as Map<String, dynamic>;
+                    final cat = (data['category'] ?? '').toString();
+                    if (category == 'All') return true;
+                    return cat.toLowerCase() == category.toLowerCase();
+                  }).toList();
 
-                  final title = (data['title'] ?? '') as String;
-                  final teacher =
-                      (data['teacherName'] ?? data['instructorName'] ?? '')
-                          as String;
-                  final imageUrl =
-                      (data['image'] ?? data['imageUrl'] ?? '') as String;
-                  final description = (data['description'] ?? '') as String;
+                  if (filtered.isEmpty) {
+                    return Center(child: Text('No courses in "$category"'));
+                  }
 
-                  return _CourseCard(
-                    title: title,
-                    teacher: teacher,
-                    imageUrl: imageUrl,
-                    description: description,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CourseDetailScreen(
-                            courseId: doc.id,
-                            data: data,
-                            currentUserId: user.uid,
-                          ),
-                        ),
+                  return ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                    itemCount: filtered.length,
+                    itemBuilder: (context, index) {
+                      final doc = filtered[index];
+                      final data = doc.data() as Map<String, dynamic>;
+                      final title = (data['title'] ?? '') as String;
+                      final teacher =
+                          (data['teacherName'] ?? data['instructorName'] ?? '')
+                              as String;
+                      final imageUrl =
+                          (data['image'] ?? data['imageUrl'] ?? '') as String;
+                      final description = (data['description'] ?? '') as String;
+
+                      return _CourseCardWithEnroll(
+                        title: title,
+                        teacher: teacher,
+                        imageUrl: imageUrl,
+                        description: description,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CourseDetailScreen(
+                                courseId: doc.id,
+                                data: data,
+                                currentUserId: user.uid,
+                              ),
+                            ),
+                          );
+                        },
+                        courseId: doc.id,
+                        currentUserId: user.uid,
+                        canEnrollGlobally: canEnrollGlobally,
+                        enrollCallback: () async {
+                          try {
+                            await _enroll(doc.id, user.uid);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Enrolled successfully'),
+                              ),
+                            );
+                            setState(() {}); // refresh enroll status
+                          } catch (e) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Failed to enroll: $e')),
+                            );
+                          }
+                        },
                       );
                     },
                   );
-                },
+                }).toList(),
               );
             },
           ),
@@ -163,20 +271,38 @@ class ExploreScreen extends StatelessWidget {
   }
 }
 
-class _CourseCard extends StatelessWidget {
+class _CourseCardWithEnroll extends StatelessWidget {
   final String title;
   final String teacher;
   final String imageUrl;
   final String description;
   final VoidCallback onTap;
+  final String courseId;
+  final String currentUserId;
+  final bool canEnrollGlobally;
+  final Future<void> Function() enrollCallback;
 
-  const _CourseCard({
+  const _CourseCardWithEnroll({
     required this.title,
     required this.teacher,
     required this.imageUrl,
     required this.description,
     required this.onTap,
+    required this.courseId,
+    required this.currentUserId,
+    required this.canEnrollGlobally,
+    required this.enrollCallback,
   });
+
+  Future<bool> _isEnrolled() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('courses')
+        .doc(courseId)
+        .collection('students')
+        .doc(currentUserId)
+        .get();
+    return snap.exists;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -250,6 +376,68 @@ class _CourseCard extends StatelessWidget {
                         color: Colors.grey.shade800,
                       ),
                     ),
+                  const SizedBox(height: 12),
+                  FutureBuilder<bool>(
+                    future: _isEnrolled(),
+                    builder: (context, enrolledSnap) {
+                      final enrolled = enrolledSnap.data ?? false;
+                      // If user is already enrolled show a subtle label
+                      if (enrolled) {
+                        return Align(
+                          alignment: Alignment.centerRight,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.shade200),
+                            ),
+                            child: const Text(
+                              'Enrolled',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+
+                      // not enrolled yet -> show enroll button (enabled based on global permission)
+                      return Align(
+                        alignment: Alignment.centerRight,
+                        child: ElevatedButton(
+                          onPressed: canEnrollGlobally
+                              ? () async {
+                                  // prevent double taps while enrolling
+                                  try {
+                                    await enrollCallback();
+                                  } catch (_) {
+                                    // errors handled by callback
+                                  }
+                                }
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: canEnrollGlobally
+                                ? AppColors.teal
+                                : Colors.grey,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: Text(
+                            canEnrollGlobally
+                                ? 'Enroll'
+                                : 'Teachers cannot enroll',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ],
               ),
             ),

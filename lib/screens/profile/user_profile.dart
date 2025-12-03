@@ -10,6 +10,7 @@ import 'package:skill_link_app/core/app_color.dart';
 import 'package:skill_link_app/core/app_textstyle.dart';
 import 'package:skill_link_app/core/app_widget.dart';
 import 'package:skill_link_app/screens/Auth/login_screen.dart';
+import 'package:skill_link_app/screens/Settings/settings.dart';
 import 'package:skill_link_app/screens/chat/chat_screen.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -327,51 +328,6 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Future<void> _logout() async {
-    final shouldLogout = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          "Logout",
-          style: AppTextStyles.title.copyWith(color: Colors.red),
-        ),
-        content: Text(
-          "Are you sure you want to logout?",
-          style: AppTextStyles.body,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(
-              "Cancel",
-              style: AppTextStyles.body.copyWith(color: AppColors.textDark),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(backgroundColor: Colors.red),
-            child: Text(
-              "Logout",
-              style: AppTextStyles.body.copyWith(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldLogout == true) {
-      await FirebaseAuth.instance.signOut();
-
-      if (!mounted) return;
-
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (route) => false,
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -410,8 +366,15 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           if (isOwner)
             IconButton(
-              icon: const Icon(Icons.logout, color: Colors.redAccent),
-              onPressed: _logout,
+              icon: const Icon(Icons.settings, color: Colors.black87),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsPage(userId: profileUid),
+                  ),
+                );
+              },
             ),
         ],
       ),
@@ -455,7 +418,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       currentUser?.displayName ??
                       'Your Name')
                   as String;
-
           final currentHeadline = (data['headline'] ?? '') as String;
           final avatarUrl = (data['avatarUrl'] ?? '') as String;
           final currentAbout = (data['about'] ?? '') as String;
@@ -531,7 +493,6 @@ class _ProfilePageState extends State<ProfilePage> {
                             ],
                           ),
                           const SizedBox(width: 16),
-
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -558,7 +519,6 @@ class _ProfilePageState extends State<ProfilePage> {
                         ],
                       ),
                       const SizedBox(height: 14),
-
                       Row(
                         children: [
                           if (isOwner)
@@ -616,9 +576,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 20),
-
               _SectionCard(
                 title: 'About',
                 child: Text(
@@ -633,9 +591,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 16),
-
               _SectionCard(
                 title: 'Skills',
                 child: currentSkills.isEmpty
@@ -669,9 +625,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             .toList(),
                       ),
               ),
-
               const SizedBox(height: 16),
-
               _SectionCard(
                 title: 'Certifications',
                 child: currentCertificates.isEmpty
@@ -712,12 +666,9 @@ class _ProfilePageState extends State<ProfilePage> {
                             .toList(),
                       ),
               ),
-
               const SizedBox(height: 16),
 
-              // Grid posts section
               _UserPostsGridSection(userId: profileUid, isOwner: isOwner),
-
               const SizedBox(height: 24),
             ],
           );
@@ -743,6 +694,7 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
   late Stream<QuerySnapshot<Map<String, dynamic>>> _postsStream;
   bool _usedFallback = false;
   String? _lastErrorMsg;
+  bool _processing = false;
 
   @override
   void initState() {
@@ -766,6 +718,156 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
         .where('userId', isEqualTo: widget.userId)
         .snapshots();
     _usedFallback = true;
+  }
+
+  Future<void> _showPostOptions({
+    required String postId,
+    required String imageUrl,
+    required String caption,
+  }) async {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _editPost(postId: postId, currentCaption: caption);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: const Text(
+                  'Delete',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmDelete(postId);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text('Cancel'),
+                onTap: () => Navigator.pop(ctx),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _editPost({
+    required String postId,
+    required String currentCaption,
+  }) async {
+    final ctrl = TextEditingController(text: currentCaption);
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Edit post'),
+          content: TextField(
+            controller: ctrl,
+            maxLines: null,
+            decoration: const InputDecoration(hintText: 'Caption'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted) return;
+    if (result == null) return;
+
+    // Save
+    setState(() => _processing = true);
+    try {
+      final newCaption = result;
+      final docRef = FirebaseFirestore.instance.collection('posts').doc(postId);
+      await docRef.set({
+        'content': newCaption,
+        'description': newCaption,
+        'caption': newCaption,
+      }, SetOptions(merge: true));
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Post updated')));
+    } catch (e) {
+      debugPrint('Edit post error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to update post')));
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  Future<void> _confirmDelete(String postId) async {
+    final should = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post'),
+        content: const Text(
+          'Are you sure you want to delete this post? This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (should == true) {
+      await _deletePost(postId);
+    }
+  }
+
+  Future<void> _deletePost(String postId) async {
+    setState(() => _processing = true);
+    try {
+      await FirebaseFirestore.instance.collection('posts').doc(postId).delete();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Post deleted')));
+    } catch (e) {
+      debugPrint('Delete post error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to delete post')));
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
   }
 
   @override
@@ -796,125 +898,153 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
           }
 
           // Already using fallback; show actionable error and retry button
-          return _SectionCard(
-            title: widget.isOwner ? 'My Posts' : 'Posts',
-            child: Column(
-              children: [
-                Text(
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  widget.isOwner ? 'My Posts' : 'Posts',
+                  style: AppTextStyles.title.copyWith(fontSize: 16),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
                   'Error loading posts',
                   style: AppTextStyles.caption.copyWith(color: Colors.red),
                 ),
-                const SizedBox(height: 8),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    _lastErrorMsg ?? errMsg,
-                    textAlign: TextAlign.center,
-                    style: AppTextStyles.caption,
-                  ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  _lastErrorMsg ?? errMsg,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.caption,
                 ),
-                const SizedBox(height: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.teal,
-                  ),
-                  onPressed: () {
-                    _setPreferredStream();
-                    setState(() {
-                      _lastErrorMsg = null;
-                    });
-                  },
-                  child: const Text('Retry ordered query'),
+              ),
+              const SizedBox(height: 8),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.teal,
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Tip: if Firestore shows an index error, open the debug console and follow the link to create the required index.',
-                  style: AppTextStyles.caption.copyWith(fontSize: 12),
-                ),
-              ],
-            ),
+                onPressed: () {
+                  _setPreferredStream();
+                  setState(() {
+                    _lastErrorMsg = null;
+                  });
+                },
+                child: const Text('Retry ordered query'),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Tip: if Firestore shows an index error, open the debug console and follow the link to create the required index.',
+                style: AppTextStyles.caption.copyWith(fontSize: 12),
+              ),
+            ],
           );
         }
 
         final docs = snap.data?.docs ?? [];
 
-        return _SectionCard(
-          title: widget.isOwner
-              ? 'My Posts (${docs.length})'
-              : 'Posts (${docs.length})',
-          child: docs.isEmpty
-              ? Text(
+        // --- NEW: No Card wrapper. Show a simple title and an Instagram-like grid
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Title row
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                widget.isOwner
+                    ? 'My Posts (${docs.length})'
+                    : 'Posts (${docs.length})',
+                style: AppTextStyles.title.copyWith(fontSize: 16),
+              ),
+            ),
+
+            // If empty, show a helpful message
+            if (docs.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
                   widget.isOwner
                       ? 'You haven\'t shared any posts yet.'
                       : 'No posts yet.',
                   style: AppTextStyles.caption,
-                )
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    final crossAxisCount = constraints.maxWidth > 480 ? 4 : 3;
-                    return GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: crossAxisCount,
-                        crossAxisSpacing: 6,
-                        mainAxisSpacing: 6,
-                        childAspectRatio: 1,
-                      ),
-                      itemCount: docs.length,
-                      itemBuilder: (context, idx) {
-                        final d = docs[idx].data();
+                ),
+              )
+            else
+              // Non-scrolling grid inside the parent ListView
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(top: 8),
+                itemCount: docs.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3, // 3 items per row (Instagram-like)
+                  crossAxisSpacing: 6,
+                  mainAxisSpacing: 6,
+                  childAspectRatio: 1, // square cells
+                ),
+                itemBuilder: (context, idx) {
+                  final docSnap = docs[idx];
+                  final d = docSnap.data();
+                  final postId = docSnap.id;
 
-                        final imageUrl =
-                            (d['imageUrl'] ??
-                                    d['media'] ??
-                                    d['thumb'] ??
-                                    d['image'] ??
-                                    '')
-                                as String;
-                        final caption =
-                            (d['content'] ??
-                                    d['description'] ??
-                                    d['caption'] ??
-                                    '')
-                                as String;
-                        final createdRaw = d['createdAt'];
-                        DateTime? created;
-                        if (createdRaw is Timestamp) {
-                          created = createdRaw.toDate();
-                        } else if (createdRaw is DateTime) {
-                          created = createdRaw;
-                        }
+                  final imageUrl =
+                      (d['imageUrl'] ??
+                              d['media'] ??
+                              d['thumb'] ??
+                              d['image'] ??
+                              '')
+                          as String;
+                  final caption =
+                      (d['content'] ?? d['description'] ?? d['caption'] ?? '')
+                          as String;
+                  final createdRaw = d['createdAt'];
+                  DateTime? created;
+                  if (createdRaw is Timestamp) {
+                    created = createdRaw.toDate();
+                  } else if (createdRaw is DateTime) {
+                    created = createdRaw;
+                  }
 
-                        return GestureDetector(
-                          onTap: () {
-                            if (imageUrl.isNotEmpty) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => _PostImageViewer(
-                                    imageUrl: imageUrl,
-                                    caption: caption,
-                                    created: created,
-                                  ),
-                                ),
-                              );
-                            } else {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => _PostDetailViewer(
-                                    caption: caption,
-                                    created: created,
-                                  ),
-                                ),
-                              );
-                            }
-                          },
-                          child: Container(
+                  return GestureDetector(
+                    onTap: () {
+                      if (imageUrl.isNotEmpty) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => _PostImageViewer(
+                              imageUrl: imageUrl,
+                              caption: caption,
+                              created: created,
+                            ),
+                          ),
+                        );
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => _PostDetailViewer(
+                              caption: caption,
+                              created: created,
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    child: SizedBox(
+                      width: 100,
+                      height: 100,
+                      child: Stack(
+                        children: [
+                          Container(
+                            width: 100,
+                            height: 100,
                             decoration: BoxDecoration(
                               color: Colors.grey.shade200,
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(6),
                               image: imageUrl.isNotEmpty
                                   ? DecorationImage(
                                       image: NetworkImage(imageUrl),
@@ -937,11 +1067,42 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
                                   )
                                 : null,
                           ),
-                        );
-                      },
-                    );
-                  },
-                ),
+
+                          // owner-only options (small 3-dot)
+                          if (widget.isOwner)
+                            Positioned(
+                              top: 4,
+                              right: 4,
+                              child: Container(
+                                height: 28,
+                                width: 28,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.45),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: IconButton(
+                                  padding: const EdgeInsets.all(6),
+                                  constraints: const BoxConstraints(),
+                                  iconSize: 16,
+                                  icon: const Icon(
+                                    Icons.more_horiz,
+                                    color: Colors.white,
+                                  ),
+                                  onPressed: () => _showPostOptions(
+                                    postId: postId,
+                                    imageUrl: imageUrl,
+                                    caption: caption,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+          ],
         );
       },
     );

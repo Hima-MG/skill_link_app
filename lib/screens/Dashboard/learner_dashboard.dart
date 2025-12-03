@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:skill_link_app/core/app_color.dart';
 import 'package:skill_link_app/core/app_textstyle.dart';
-import 'package:skill_link_app/screens/Explore/course_ui.dart';
+import 'package:skill_link_app/screens/Explore/module_list.dart';
 import 'package:skill_link_app/screens/profile/user_profile.dart';
 
 class LearnerDashboard extends StatelessWidget {
@@ -232,13 +232,13 @@ class LearnerDashboard extends StatelessWidget {
                   imageUrl: imageUrl,
                   progress: progress,
                   onTap: () {
+                    // navigate to module list (learner-facing)
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => CourseDetailScreen(
+                        builder: (_) => ModuleListScreen(
                           courseId: doc.id,
-                          data: data,
-                          currentUserId: uid,
+                          courseTitle: title,
                         ),
                       ),
                     );
@@ -385,7 +385,6 @@ class _StatCard extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            // <-- this avoids overflow
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

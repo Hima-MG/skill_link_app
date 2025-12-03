@@ -1,3 +1,4 @@
+// lib/screens/Explore/create_course.dart
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:skill_link_app/core/app_color.dart';
 
 import 'package:skill_link_app/core/app_widget.dart';
+import 'package:skill_link_app/screens/Explore/course_details.dart';
 
 class CreateCourseScreen extends StatefulWidget {
   const CreateCourseScreen({super.key});
@@ -135,10 +137,15 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
         'popularity': 0,
       };
 
-      await FirebaseFirestore.instance.collection('courses').add(courseData);
+      final docRef = await FirebaseFirestore.instance
+          .collection('courses')
+          .add(courseData);
 
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => ModulePage(courseId: docRef.id)),
+      );
     } catch (e) {
       debugPrint('CreateCourse error: $e');
       setState(() {
@@ -360,7 +367,6 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
                     (v == null || v.trim().isEmpty) ? 'Enter title' : null,
               ),
               const SizedBox(height: 14),
-
               const Text(
                 'Category',
                 style: TextStyle(fontWeight: FontWeight.w600),
@@ -390,7 +396,6 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 14),
               const Text(
                 'Description',
@@ -407,7 +412,6 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
                     ? 'Enter description'
                     : null,
               ),
-
               const SizedBox(height: 18),
               const Text(
                 'Course Thumbnail',
@@ -459,7 +463,6 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
                   ),
                 ),
               ),
-
               const SizedBox(height: 18),
               const Text(
                 'Course Content',
@@ -470,20 +473,15 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
                 icon: Icons.videocam_outlined,
                 title: 'Add Video',
                 subtitle: 'Upload video lessons',
-                onTap: () {
-                  // TODO: video upload
-                },
+                onTap: () {},
               ),
               const SizedBox(height: 8),
               _contentRow(
                 icon: Icons.insert_drive_file_outlined,
                 title: 'Add Document',
                 subtitle: 'Upload PDF or resources',
-                onTap: () {
-                  // TODO: doc upload
-                },
+                onTap: () {},
               ),
-
               const SizedBox(height: 18),
               const Text(
                 'Pricing',
@@ -538,18 +536,15 @@ class _CreateCourseScreenState extends State<CreateCourseScreen> {
                     ),
                     Switch(
                       value: _isPaid,
-                      onChanged: (v) {
-                        setState(() {
-                          _isPaid = v;
-                          if (!v) _price = 0;
-                        });
-                      },
+                      onChanged: (v) => setState(() {
+                        _isPaid = v;
+                        if (!v) _price = 0;
+                      }),
                       activeColor: AppColors.teal,
                     ),
                   ],
                 ),
               ),
-
               const SizedBox(height: 18),
               if (_error != null)
                 Text(_error!, style: const TextStyle(color: Colors.red)),
