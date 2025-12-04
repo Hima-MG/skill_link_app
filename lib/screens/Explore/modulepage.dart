@@ -406,6 +406,7 @@ class _ModuleNotesPage extends StatelessWidget {
   const _ModuleNotesPage({
     required this.title,
     required this.description,
+    // ignore: unused_element_parameter
     super.key,
   });
 

@@ -32,11 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
       '/mnt/data/Screenshot 2025-11-20 124827.png';
 
   @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
@@ -85,17 +80,6 @@ class _HomeScreenState extends State<HomeScreen> {
         .orderBy('popularity', descending: true)
         .limit(10)
         .snapshots();
-  }
-
-  String _formatTimestamp(Timestamp ts) {
-    final dt = ts.toDate();
-    final now = DateTime.now();
-    final diff = now.difference(dt);
-    if (diff.inDays >= 7) return '${dt.day}/${dt.month}/${dt.year}';
-    if (diff.inDays >= 1) return '${diff.inDays}d ago';
-    if (diff.inHours >= 1) return '${diff.inHours}h ago';
-    if (diff.inMinutes >= 1) return '${diff.inMinutes}m ago';
-    return 'just now';
   }
 
   void _openComments(String postId) {
@@ -901,8 +885,7 @@ class _PostCardState extends State<PostCard> {
         _mediaUrl = newMedia;
         _title = newTitle;
         _description = newDesc;
-        // don't overwrite _isLiked (user-specific). But if backend changed likesCount drastically
-        // we sync it only if not processing a local change.
+
         if (!_processingLike) _likesCount = newLikesCount;
       });
     }

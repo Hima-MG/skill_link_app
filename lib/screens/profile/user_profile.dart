@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:skill_link_app/core/app_color.dart';
 import 'package:skill_link_app/core/app_textstyle.dart';
 import 'package:skill_link_app/core/app_widget.dart';
-import 'package:skill_link_app/screens/Auth/login_screen.dart';
 import 'package:skill_link_app/screens/Settings/settings.dart';
 import 'package:skill_link_app/screens/chat/chat_screen.dart';
 
@@ -27,7 +26,7 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _avatarUploading = false;
   bool _savingProfile = false;
 
-  // ---- controllers for edit profile dialog (best practice) ----
+  // Controllers for edit profile dialog
   final TextEditingController _nameCtrl = TextEditingController();
   final TextEditingController _headlineCtrl = TextEditingController();
   final TextEditingController _aboutCtrl = TextEditingController();
@@ -121,7 +120,6 @@ class _ProfilePageState extends State<ProfilePage> {
     required List<String> currentSkills,
     required List<String> currentCertificates,
   }) async {
-    // set current values into controllers
     _nameCtrl.text = currentName;
     _headlineCtrl.text = currentHeadline;
     _aboutCtrl.text = currentAbout;
@@ -216,8 +214,6 @@ class _ProfilePageState extends State<ProfilePage> {
         );
       },
     );
-
-    // no manual dispose here – controllers belong to State
 
     return result;
   }
@@ -440,7 +436,6 @@ class _ProfilePageState extends State<ProfilePage> {
                     children: [
                       Row(
                         children: [
-                          // Avatar
                           Stack(
                             clipBehavior: Clip.none,
                             children: [
@@ -667,7 +662,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
               ),
               const SizedBox(height: 16),
-
               _UserPostsGridSection(userId: profileUid, isOwner: isOwner),
               const SizedBox(height: 24),
             ],
@@ -679,7 +673,7 @@ class _ProfilePageState extends State<ProfilePage> {
 }
 
 /// Section showing user's posts in a grid (Instagram-like).
-/// Tries an ordered query first; falls back to an unordered query if Firestore returns an error (missing createdAt/index).
+/// Tries an ordered query first; falls back to an unordered query if Firestore returns an error.
 class _UserPostsGridSection extends StatefulWidget {
   final String userId;
   final bool isOwner;
@@ -694,7 +688,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
   late Stream<QuerySnapshot<Map<String, dynamic>>> _postsStream;
   bool _usedFallback = false;
   String? _lastErrorMsg;
-  bool _processing = false;
 
   @override
   void initState() {
@@ -722,7 +715,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
 
   Future<void> _showPostOptions({
     required String postId,
-    required String imageUrl,
     required String caption,
   }) async {
     showModalBottomSheet(
@@ -795,11 +787,8 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
       },
     );
 
-    if (!mounted) return;
-    if (result == null) return;
+    if (!mounted || result == null) return;
 
-    // Save
-    setState(() => _processing = true);
     try {
       final newCaption = result;
       final docRef = FirebaseFirestore.instance.collection('posts').doc(postId);
@@ -819,8 +808,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Failed to update post')));
-    } finally {
-      if (mounted) setState(() => _processing = false);
     }
   }
 
@@ -852,7 +839,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
   }
 
   Future<void> _deletePost(String postId) async {
-    setState(() => _processing = true);
     try {
       await FirebaseFirestore.instance.collection('posts').doc(postId).delete();
       if (!mounted) return;
@@ -865,8 +851,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Failed to delete post')));
-    } finally {
-      if (mounted) setState(() => _processing = false);
     }
   }
 
@@ -897,7 +881,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          // Already using fallback; show actionable error and retry button
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -947,11 +930,9 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
 
         final docs = snap.data?.docs ?? [];
 
-        // --- NEW: No Card wrapper. Show a simple title and an Instagram-like grid
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Title row
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
@@ -961,8 +942,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
                 style: AppTextStyles.title.copyWith(fontSize: 16),
               ),
             ),
-
-            // If empty, show a helpful message
             if (docs.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -974,17 +953,16 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
                 ),
               )
             else
-              // Non-scrolling grid inside the parent ListView
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.only(top: 8),
                 itemCount: docs.length,
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 3, // 3 items per row (Instagram-like)
+                  crossAxisCount: 3,
                   crossAxisSpacing: 6,
                   mainAxisSpacing: 6,
-                  childAspectRatio: 1, // square cells
+                  childAspectRatio: 1,
                 ),
                 itemBuilder: (context, idx) {
                   final docSnap = docs[idx];
@@ -1067,8 +1045,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
                                   )
                                 : null,
                           ),
-
-                          // owner-only options (small 3-dot)
                           if (widget.isOwner)
                             Positioned(
                               top: 4,
@@ -1090,7 +1066,6 @@ class _UserPostsGridSectionState extends State<_UserPostsGridSection> {
                                   ),
                                   onPressed: () => _showPostOptions(
                                     postId: postId,
-                                    imageUrl: imageUrl,
                                     caption: caption,
                                   ),
                                 ),
@@ -1113,6 +1088,7 @@ class _PostImageViewer extends StatelessWidget {
   final String imageUrl;
   final String caption;
   final DateTime? created;
+
   const _PostImageViewer({
     required this.imageUrl,
     required this.caption,
@@ -1135,7 +1111,7 @@ class _PostImageViewer extends StatelessWidget {
                 child: Image.network(
                   imageUrl,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) =>
+                  errorBuilder: (_, __, ___) =>
                       const Icon(Icons.broken_image, color: Colors.white),
                 ),
               ),
@@ -1174,6 +1150,7 @@ class _PostImageViewer extends StatelessWidget {
 class _PostDetailViewer extends StatelessWidget {
   final String caption;
   final DateTime? created;
+
   const _PostDetailViewer({required this.caption, this.created});
 
   @override

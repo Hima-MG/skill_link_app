@@ -15,7 +15,6 @@ class ExploreScreen extends StatefulWidget {
 
 class _ExploreScreenState extends State<ExploreScreen>
     with SingleTickerProviderStateMixin {
-  // Added "Dance" to the categories list
   final List<String> _categories = [
     'All',
     'Development',
@@ -51,17 +50,6 @@ class _ExploreScreenState extends State<ExploreScreen>
   void dispose() {
     _tabController.dispose();
     super.dispose();
-  }
-
-  Future<bool> _isEnrolled(String courseId, String uid) async {
-    if (uid.isEmpty) return false;
-    final snap = await FirebaseFirestore.instance
-        .collection('courses')
-        .doc(courseId)
-        .collection('students')
-        .doc(uid)
-        .get();
-    return snap.exists;
   }
 
   Future<void> _enroll(String courseId, String uid) async {
@@ -122,7 +110,6 @@ class _ExploreScreenState extends State<ExploreScreen>
         final userData = userSnap.data!.data() ?? {};
         final intent = (userData['intent'] ?? 'Learn') as String;
         final bool canCreateCourse = intent == 'Teach' || intent == 'Both';
-        // Enrollment allowed when intent is Learn or Both
         final bool canEnrollGlobally = intent == 'Learn' || intent == 'Both';
 
         return Scaffold(
@@ -147,7 +134,6 @@ class _ExploreScreenState extends State<ExploreScreen>
               tabs: _categories.map((c) => Tab(text: c)).toList(),
             ),
           ),
-
           floatingActionButton: canCreateCourse
               ? FloatingActionButton(
                   backgroundColor: AppColors.teal,
@@ -168,7 +154,6 @@ class _ExploreScreenState extends State<ExploreScreen>
                   child: const Icon(Icons.add, color: Colors.white),
                 )
               : null,
-
           body: StreamBuilder<QuerySnapshot>(
             stream: _coursesStream(),
             builder: (context, snapshot) {
@@ -191,11 +176,9 @@ class _ExploreScreenState extends State<ExploreScreen>
 
               final docs = snapshot.data!.docs;
 
-              // We'll build a TabBarView with one list per category so switching tabs is snappy.
               return TabBarView(
                 controller: _tabController,
                 children: _categories.map((category) {
-                  // filter docs client-side by category field (case-insensitive).
                   final filtered = docs.where((d) {
                     final data = d.data() as Map<String, dynamic>;
                     final cat = (data['category'] ?? '').toString();
@@ -381,7 +364,7 @@ class _CourseCardWithEnroll extends StatelessWidget {
                     future: _isEnrolled(),
                     builder: (context, enrolledSnap) {
                       final enrolled = enrolledSnap.data ?? false;
-                      // If user is already enrolled show a subtle label
+
                       if (enrolled) {
                         return Align(
                           alignment: Alignment.centerRight,
@@ -406,17 +389,15 @@ class _CourseCardWithEnroll extends StatelessWidget {
                         );
                       }
 
-                      // not enrolled yet -> show enroll button (enabled based on global permission)
                       return Align(
                         alignment: Alignment.centerRight,
                         child: ElevatedButton(
                           onPressed: canEnrollGlobally
                               ? () async {
-                                  // prevent double taps while enrolling
                                   try {
                                     await enrollCallback();
                                   } catch (_) {
-                                    // errors handled by callback
+                                    // errors handled in callback
                                   }
                                 }
                               : null,
