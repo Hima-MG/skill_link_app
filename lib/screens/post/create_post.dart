@@ -1,4 +1,3 @@
-// lib/screens/posts/create_post.dart
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloudinary_public/cloudinary_public.dart';

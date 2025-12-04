@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:skill_link_app/core/app_color.dart';
 import 'package:skill_link_app/core/app_textstyle.dart';
-import 'package:skill_link_app/screens/Explore/course_ui.dart';
+import 'package:skill_link_app/screens/Explore/modulepage.dart';
 
 import 'package:skill_link_app/screens/Explore/create_corse.dart';
 import 'package:skill_link_app/screens/profile/user_profile.dart';
@@ -401,15 +401,12 @@ class _TeacherCoursesSection extends StatelessWidget {
                   students: students,
                   isPaid: isPaid,
                   price: price,
+                  // NAVIGATE TO ModulePage when teacher taps a course
                   onTap: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => CourseDetailScreen(
-                          courseId: doc.id,
-                          data: data,
-                          currentUserId: userId,
-                        ),
+                        builder: (_) => ModulePage(courseId: doc.id),
                       ),
                     );
                   },

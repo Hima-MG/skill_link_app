@@ -217,32 +217,37 @@ class LearnerDashboard extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
+              // Build course cards dynamically. each card will compute live progress from modules & user progress doc
               ...docs.map((doc) {
                 final data = doc.data();
                 final title = data['title'] as String? ?? 'Untitled course';
                 final desc = data['description'] as String? ?? '';
                 final imageUrl = data['imageUrl'] as String? ?? '';
                 final teacherName = data['teacherName'] as String? ?? 'Teacher';
-                final progress = 0.3; // TODO: hook to real progress later
+                final courseId = doc.id;
 
-                return _LearnerCourseCard(
-                  title: title,
-                  description: desc,
-                  teacherName: teacherName,
-                  imageUrl: imageUrl,
-                  progress: progress,
-                  onTap: () {
-                    // navigate to module list (learner-facing)
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ModuleListScreen(
-                          courseId: doc.id,
-                          courseTitle: title,
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _LearnerCourseCardWithProgress(
+                    courseId: courseId,
+                    title: title,
+                    description: desc,
+                    teacherName: teacherName,
+                    imageUrl: imageUrl,
+                    uid: uid,
+                    onTap: () {
+                      // navigate to module list (learner-facing)
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ModuleListScreen(
+                            courseId: courseId,
+                            courseTitle: title,
+                          ),
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 );
               }).toList(),
             ],
@@ -413,29 +418,124 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-class _LearnerCourseCard extends StatelessWidget {
+/* ----------------- Course card that computes module-based progress ----------------- */
+
+class _LearnerCourseCardWithProgress extends StatefulWidget {
+  final String courseId;
   final String title;
   final String description;
   final String teacherName;
   final String imageUrl;
-  final double progress;
+  final String uid;
   final VoidCallback onTap;
 
-  const _LearnerCourseCard({
+  const _LearnerCourseCardWithProgress({
+    required this.courseId,
     required this.title,
     required this.description,
     required this.teacherName,
     required this.imageUrl,
-    required this.progress,
+    required this.uid,
     required this.onTap,
+    super.key,
   });
 
   @override
+  State<_LearnerCourseCardWithProgress> createState() =>
+      _LearnerCourseCardWithProgressState();
+}
+
+class _LearnerCourseCardWithProgressState
+    extends State<_LearnerCourseCardWithProgress> {
+  double _progress = 0.0;
+  int _completed = 0;
+  int _total = 0;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProgress();
+    // listen to modules and user progress updates by setting up snapshot listeners
+    FirebaseFirestore.instance
+        .collection('courses')
+        .doc(widget.courseId)
+        .collection('modules')
+        .snapshots()
+        .listen((_) => _loadProgress());
+    FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.uid)
+        .collection('courseProgress')
+        .doc(widget.courseId)
+        .snapshots()
+        .listen((_) => _loadProgress());
+  }
+
+  Future<void> _loadProgress() async {
+    setState(() => _loading = true);
+
+    try {
+      final modulesSnap = await FirebaseFirestore.instance
+          .collection('courses')
+          .doc(widget.courseId)
+          .collection('modules')
+          .get();
+
+      final total = modulesSnap.docs.length;
+
+      final progressDocRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.uid)
+          .collection('courseProgress')
+          .doc(widget.courseId);
+
+      final progressSnap = await progressDocRef.get();
+      final completedIds = <String>[];
+      if (progressSnap.exists) {
+        final data = progressSnap.data() as Map<String, dynamic>? ?? {};
+        final list =
+            (data['completedModuleIds'] as List<dynamic>?) ?? <dynamic>[];
+        for (final it in list) {
+          completedIds.add(it.toString());
+        }
+      }
+
+      final completed = completedIds.length;
+      final progress = total == 0 ? 0.0 : (completed / total);
+
+      // If user completed all modules, mark course as completed (add to course.completedUsers)
+
+      if (total > 0 && completed == total) {
+        final courseRef = FirebaseFirestore.instance
+            .collection('courses')
+            .doc(widget.courseId);
+        await courseRef.set({
+          'completedUsers': FieldValue.arrayUnion([widget.uid]),
+        }, SetOptions(merge: true));
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _total = total;
+        _completed = completed;
+        _progress = progress.clamp(0.0, 1.0);
+      });
+    } catch (e) {
+      debugPrint('Error loading progress for ${widget.courseId}: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final percentText = '${(_progress * 100).round()}%';
+
     return GestureDetector(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: 6),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -449,7 +549,7 @@ class _LearnerCourseCard extends StatelessWidget {
                     topLeft: Radius.circular(14),
                     bottomLeft: Radius.circular(14),
                   ),
-                  child: imageUrl.isEmpty
+                  child: widget.imageUrl.isEmpty
                       ? Container(
                           width: 90,
                           height: 90,
@@ -457,7 +557,7 @@ class _LearnerCourseCard extends StatelessWidget {
                           child: const Icon(Icons.image_outlined),
                         )
                       : Image.network(
-                          imageUrl,
+                          widget.imageUrl,
                           width: 90,
                           height: 90,
                           fit: BoxFit.cover,
@@ -469,13 +569,13 @@ class _LearnerCourseCard extends StatelessWidget {
                     padding: const EdgeInsets.only(
                       top: 10,
                       right: 10,
-                      bottom: 4,
+                      bottom: 6,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          title,
+                          widget.title,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -485,7 +585,7 @@ class _LearnerCourseCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          description,
+                          widget.description,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -495,7 +595,7 @@ class _LearnerCourseCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'By $teacherName',
+                          'By ${widget.teacherName}',
                           style: const TextStyle(
                             fontSize: 11,
                             color: Colors.black54,
@@ -515,21 +615,30 @@ class _LearnerCourseCard extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          backgroundColor: AppColors.fieldBg,
-                        ),
+                        child: _loading
+                            ? Container(height: 6, color: AppColors.fieldBg)
+                            : LinearProgressIndicator(
+                                value: _progress,
+                                backgroundColor: AppColors.fieldBg,
+                              ),
                       ),
                       const SizedBox(width: 8),
-                      Text('${(progress * 100).round()}%'),
+                      Text(percentText),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Continue learning',
-                      style: TextStyle(fontSize: 11, color: Colors.black54),
+                      _total == 0
+                          ? 'No modules yet'
+                          : (_completed == _total
+                                ? 'Completed'
+                                : 'Continue learning'),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.black54,
+                      ),
                     ),
                   ),
                 ],

@@ -9,7 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:skill_link_app/core/app_color.dart';
 
 import 'package:skill_link_app/core/app_widget.dart';
-import 'package:skill_link_app/screens/Explore/course_details.dart';
+import 'package:skill_link_app/screens/Explore/modulepage.dart';
 
 class CreateCourseScreen extends StatefulWidget {
   const CreateCourseScreen({super.key});
