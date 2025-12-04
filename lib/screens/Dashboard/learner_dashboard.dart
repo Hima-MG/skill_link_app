@@ -418,8 +418,6 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-/* ----------------- Course card that computes module-based progress ----------------- */
-
 class _LearnerCourseCardWithProgress extends StatefulWidget {
   final String courseId;
   final String title;

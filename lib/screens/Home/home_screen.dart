@@ -27,24 +27,44 @@ class _HomeScreenState extends State<HomeScreen> {
   final _searchCtrl = TextEditingController();
   int _bottomIndex = 0;
 
+  // current search text (lowercased)
+  String _searchTerm = '';
+
   // Local fallback placeholder path (optional)
   static const String _localPlaceholder =
       '/mnt/data/Screenshot 2025-11-20 124827.png';
 
   @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    setState(() {
+      _searchTerm = _searchCtrl.text.trim().toLowerCase();
+    });
+  }
+
+  @override
   void dispose() {
+    _searchCtrl.removeListener(_onSearchChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
 
   void _onBottomNavTap(int idx) {
-    if (idx == _bottomIndex) return;
-    setState(() => _bottomIndex = idx);
+    // For home tab, we just set index (no navigation)
+    if (idx == 0) {
+      if (_bottomIndex != 0) {
+        setState(() => _bottomIndex = 0);
+      }
+      return;
+    }
 
+    // For other tabs, we only navigate, we keep bottomIndex = 0
+    // so when we pop back, Home remains highlighted.
     switch (idx) {
-      case 0:
-        // already on home
-        break;
       case 1:
         Navigator.push(
           context,
@@ -574,17 +594,43 @@ class _HomeScreenState extends State<HomeScreen> {
 
                                   final docs = snap.data?.docs ?? [];
 
-                                  if (docs.isEmpty) {
-                                    return const Center(
-                                      child: Text('No trending courses yet'),
+                                  // Apply search filter to courses
+                                  List<
+                                    QueryDocumentSnapshot<Map<String, dynamic>>
+                                  >
+                                  filteredDocs = docs;
+                                  if (_searchTerm.isNotEmpty) {
+                                    filteredDocs = docs.where((doc) {
+                                      final data = doc.data();
+                                      final title =
+                                          (data['title'] ?? '') as String? ??
+                                          '';
+                                      final teacher =
+                                          (data['teacherName'] ??
+                                                  data['authorName'] ??
+                                                  '')
+                                              as String? ??
+                                          '';
+                                      final combined = '$title $teacher'
+                                          .toLowerCase();
+                                      return combined.contains(_searchTerm);
+                                    }).toList();
+                                  }
+
+                                  if (filteredDocs.isEmpty) {
+                                    return Center(
+                                      child: Text(
+                                        _searchTerm.isEmpty
+                                            ? 'No trending courses yet'
+                                            : 'No courses match your search',
+                                      ),
                                     );
                                   }
 
                                   final currentUid =
                                       FirebaseAuth.instance.currentUser?.uid;
 
-                                  // build list of widgets for carousel
-                                  final items = docs.map((doc) {
+                                  final items = filteredDocs.map((doc) {
                                     final data = doc.data();
                                     final courseId = doc.id;
                                     return GestureDetector(
@@ -656,13 +702,45 @@ class _HomeScreenState extends State<HomeScreen> {
                             );
                           }
                           final docs = snapshot.data?.docs ?? [];
-                          if (docs.isEmpty) {
+
+                          // Apply search filter to posts
+                          List<QueryDocumentSnapshot<Map<String, dynamic>>>
+                          filteredDocs = docs;
+                          if (_searchTerm.isNotEmpty) {
+                            filteredDocs = docs.where((doc) {
+                              final data = doc.data();
+                              final title =
+                                  (data['title'] ?? '') as String? ?? '';
+                              final desc =
+                                  (data['content'] ??
+                                          data['description'] ??
+                                          data['caption'] ??
+                                          data['text'] ??
+                                          '')
+                                      as String? ??
+                                  '';
+                              final author =
+                                  (data['authorName'] ??
+                                          data['author'] ??
+                                          data['author_displayName'] ??
+                                          '')
+                                      as String? ??
+                                  '';
+                              final combined = '$title $desc $author'
+                                  .toLowerCase();
+                              return combined.contains(_searchTerm);
+                            }).toList();
+                          }
+
+                          if (filteredDocs.isEmpty) {
                             return SliverToBoxAdapter(
                               child: Center(
                                 child: Padding(
                                   padding: const EdgeInsets.only(top: 30),
                                   child: Text(
-                                    'No posts yet — create the first one!',
+                                    _searchTerm.isEmpty
+                                        ? 'No posts yet — create the first one!'
+                                        : 'No posts match your search',
                                     style: AppTextStyles.body,
                                   ),
                                 ),
@@ -676,8 +754,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               context,
                               index,
                             ) {
-                              final doc = docs[index];
-                              // Use PostCard StatefulWidget to isolate likes & avoid flicker
+                              final doc = filteredDocs[index];
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
                                 child: PostCard(
@@ -688,7 +765,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   localPlaceholder: _localPlaceholder,
                                 ),
                               );
-                            }, childCount: docs.length),
+                            }, childCount: filteredDocs.length),
                           );
                         },
                       ),
